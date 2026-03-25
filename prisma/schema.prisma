@@ -1,0 +1,198 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Organization {
+  id           String        @id @default(cuid())
+  name         String
+  slug         String        @unique
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  customers    Customer[]
+  events       Event[]
+  leads        Lead[]
+  projects     Project[]
+  transactions Transaction[]
+  messages     Message[]     @relation("OrganizationMessages")
+  campaigns    Campaign[]    @relation("OrganizationCampaigns")
+  users        User[]        @relation("OrganizationUsers")
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  password       String
+  name           String?
+  role           String       @default("VIEWER")
+  organizationId String
+  consentGiven   Boolean      @default(false)
+  consentDate    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  tasks          TaskCard[]
+  organization   Organization @relation("OrganizationUsers", fields: [organizationId], references: [id])
+}
+
+model Lead {
+  id             String        @id @default(cuid())
+  name           String
+  email          String?
+  phone          String?
+  status         String        @default("NOVO")
+  score          Int           @default(0)
+  tags           String?       // Tags separadas por vírgula (ex: "import-pascoa,vip")
+  organizationId String
+  consentGiven   Boolean       @default(false)
+  consentDate    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  opportunities  Opportunity[]
+  messages       Message[]     @relation("LeadMessages")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  text           String
+  sender         String       @default("me") // "me" (usuário do CRM) ou "lead" (cliente)
+  leadId         String
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  lead           Lead         @relation("LeadMessages", fields: [leadId], references: [id], onDelete: Cascade)
+  organization   Organization @relation("OrganizationMessages", fields: [organizationId], references: [id])
+}
+
+model Opportunity {
+  id        String     @id @default(cuid())
+  title     String
+  value     Float      @default(0)
+  stage     String     @default("CONTATO")
+  leadId    String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  lead      Lead       @relation(fields: [leadId], references: [id])
+  tasks     TaskCard[]
+}
+
+model Project {
+  id             String       @id @default(cuid())
+  name           String
+  progress       Int          @default(0)
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  columns        Column[]
+  organization   Organization @relation(fields: [organizationId], references: [id])
+}
+
+model Column {
+  id        String     @id @default(cuid())
+  title     String
+  order     Int
+  projectId String
+  project   Project    @relation(fields: [projectId], references: [id])
+  cards     TaskCard[]
+}
+
+model TaskCard {
+  id            String       @id @default(cuid())
+  title         String
+  description   String?
+  progress      Int          @default(0)
+  priority      String       @default("NORMAL")
+  date          String?
+  columnId      String
+  opportunityId String?
+  userId        String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  user          User?        @relation(fields: [userId], references: [id])
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  column        Column       @relation(fields: [columnId], references: [id])
+}
+
+model Customer {
+  id             String         @id @default(cuid())
+  name           String
+  domain         String?
+  mrr            Float          @default(0)
+  ltv            Float          @default(0)
+  status         String         @default("ATIVO")
+  organizationId String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  subscriptions  Subscription[]
+}
+
+model Subscription {
+  id         String   @id @default(cuid())
+  plan       String
+  status     String
+  price      Float
+  customerId String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  customer   Customer @relation(fields: [customerId], references: [id])
+}
+
+model Event {
+  id             String       @id @default(cuid())
+  title          String
+  description    String?
+  start          DateTime
+  end            DateTime?
+  color          String?      @default("bg-primary")
+  priority       String?      @default("NORMAL")
+  location       String?
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+}
+
+model Transaction {
+  id             String       @id @default(cuid())
+  description    String
+  amount         Float
+  type           String       @default("INCOME")
+  category       String?
+  date           DateTime     @default(now())
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+}
+
+model Campaign {
+  id             String        @id @default(cuid())
+  name           String
+  message        String
+  status         String        @default("PENDING") // PENDING, PROCESSING, PAUSED, COMPLETED, FAILED
+  totalContacts  Int           @default(0)
+  processedCount Int           @default(0)
+  successCount   Int           @default(0)
+  failedCount    Int           @default(0)
+  targetTags     String?       // Tags de alvo separadas por vírgula
+  organizationId String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  organization   Organization  @relation("OrganizationCampaigns", fields: [organizationId], references: [id])
+  logs           CampaignLog[]
+}
+
+model CampaignLog {
+  id         String   @id @default(cuid())
+  campaignId String
+  phone      String
+  status     String   // SENT, FAILED, INVALID_NUMBER
+  error      String?
+  createdAt  DateTime @default(now())
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
