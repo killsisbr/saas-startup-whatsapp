@@ -3,6 +3,14 @@ import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from './prisma';
+import { processAutoReply } from './autoReplyService';
+import { startSchedulingWorker } from './schedulingService';
+import { handleSalesMessage } from './ai/salesAiService';
+
+// Inicia o worker globalmente uma única vez
+if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'test') {
+  startSchedulingWorker();
+}
 
 // Tipagem para o estado da conexão
 export type WhatsAppStatus = 'DISCONNECTED' | 'INITIALIZING' | 'QR_CODE' | 'CONNECTED';
@@ -37,14 +45,13 @@ export async function getWhatsAppSession(userId: string): Promise<WhatsAppSessio
  */
 export async function initializeWhatsAppClient(userId: string): Promise<WhatsAppSession> {
   if (sessions[userId]) return sessions[userId];
-  if (initializationPromises[userId]) return initializationPromises[userId];
+  if (userId in initializationPromises) return initializationPromises[userId];
 
   initializationPromises[userId] = (async () => {
     const sessionPath = path.join(SESSION_DATA_PATH, `session-${userId}`);
     console.log(`PONTO DE CONTROLE: Inicializando com pasta: ${sessionPath}`);
     
     if (fs.existsSync(sessionPath)) {
-      // Limpar travas do Puppeteer (bug comum no Windows)
       const lockFiles = [
         path.join(sessionPath, 'SingletonLock'),
         path.join(sessionPath, 'Default', 'SingletonLock'),
@@ -77,22 +84,19 @@ export async function initializeWhatsAppClient(userId: string): Promise<WhatsApp
     sessions[userId] = session;
 
     client.on('qr', async (qr) => {
-      // Pequeno delay para evitar mostrar QR se a restauração for iminente
-      setTimeout(async () => {
-        if (session.status === 'INITIALIZING') {
-          console.log(`QR Code gerado para o usuário: ${userId}`);
-          session.status = 'QR_CODE';
-          try {
-            session.qrCode = await qrcode.toDataURL(qr);
-          } catch (err) {
-            console.error('Erro ao gerar QR Code base64:', err);
-          }
+      if (session.status === 'INITIALIZING' || session.status === 'QR_CODE') {
+        console.log(`[WA] QR Code gerado para o usuário: ${userId}`);
+        session.status = 'QR_CODE';
+        try {
+          session.qrCode = await qrcode.toDataURL(qr);
+        } catch (err) {
+          console.error('[WA] Erro ao gerar QR Code base64:', err);
         }
-      }, 5000); // 5 segundos de carência
+      }
     });
 
     client.on('authenticated', () => {
-      console.log(`USUÁRIO AUTENTICADO (Sessão restaurada) para: ${userId}`);
+      console.log(`USUÁRIO AUTENTICADO para: ${userId}`);
       session.status = 'CONNECTED';
       session.qrCode = undefined;
     });
@@ -111,15 +115,32 @@ export async function initializeWhatsAppClient(userId: string): Promise<WhatsApp
       console.log(`Mensagem recebida de ${from}: ${msg.body}`);
 
       try {
-        const lead = await prisma.lead.findFirst({
-          where: {
-            phone: {
-              contains: from.slice(-8)
-            }
-          }
+        const fromClean = from.replace(/\D/g, '');
+        
+        // 1. Tentar localizar o Lead ou Criar um novo
+        let lead = await prisma.lead.findFirst({
+          where: { phone: { contains: fromClean.slice(-8) } }
         });
 
+        // Se não existir lead, precisamos de uma organizationId.
+        // Pegamos do usuário que inicializou a sessão.
+        if (!lead) {
+            const user = await prisma.user.findUnique({ where: { id: userId } });
+            if (user) {
+                lead = await prisma.lead.create({
+                    data: {
+                        phone: fromClean,
+                        name: 'Lead Novo (WA)',
+                        organizationId: user.organizationId,
+                        status: 'NOVO'
+                    }
+                });
+                console.log(`[WA] Novo lead criado: ${fromClean}`);
+            }
+        }
+
         if (lead) {
+          // 2. Salvar Mensagem do Lead
           await prisma.message.create({
             data: {
               text: msg.body,
@@ -129,33 +150,47 @@ export async function initializeWhatsAppClient(userId: string): Promise<WhatsApp
             }
           });
           
-          await prisma.lead.update({
+          await (prisma.lead as any).update({
             where: { id: lead.id },
-            data: { updatedAt: new Date() }
+            data: { updatedAt: new Date(), lastInteraction: new Date() }
           });
+
+          console.log(`[WA] Mensagem salva para lead ${lead.id}`);
+
+          // 3. Processar Automations (Auto-Reply -> AI)
+          const wasAutoReplied = await processAutoReply(msg.body, from, lead.organizationId);
+          
+          if (!wasAutoReplied && (lead as any).aiEnabled) {
+              console.log(`[WA] Chamando JARVIS AI para ${from}...`);
+              const aiResponse = await handleSalesMessage(lead.organizationId, from, msg.body);
+              if (aiResponse) {
+                  await msg.reply(aiResponse);
+                  // Salvar resposta da IA
+                  await prisma.message.create({
+                      data: {
+                          text: aiResponse,
+                          sender: 'me',
+                          leadId: lead.id,
+                          organizationId: lead.organizationId
+                      }
+                  });
+              }
+          }
         }
       } catch (err) {
-        console.error('Erro ao processar mensagem recebida:', err);
+        console.error('[WA] Erro ao processar mensagem recebida:', err);
       }
     });
 
     client.on('disconnected', (reason) => {
-      console.log(`WhatsApp desconectado para o usuário: ${userId}. Motivo: ${reason}`);
-      session.status = 'DISCONNECTED';
-      session.qrCode = undefined;
-      session.whatsappNumber = undefined;
-      delete sessions[userId];
-    });
-
-    client.on('auth_failure', (msg) => {
-      console.error(`FALHA NA AUTENTICAÇÃO para o usuário: ${userId}:`, msg);
+      console.log(`WhatsApp desconectado para ${userId}: ${reason}`);
       session.status = 'DISCONNECTED';
       delete sessions[userId];
     });
 
-    // Inicializa sem bloquear a resposta da API (mas agora dentro da Promise controlada)
+    console.log(`[WA] Chamando client.initialize() para ${userId}`);
     client.initialize().catch((err) => {
-      console.error(`Erro ao inicializar cliente para ${userId}:`, err);
+      console.error(`[WA] Erro ao inicializar cliente para ${userId}:`, err);
       delete sessions[userId];
     }).finally(() => {
       delete initializationPromises[userId];
@@ -167,9 +202,6 @@ export async function initializeWhatsAppClient(userId: string): Promise<WhatsApp
   return initializationPromises[userId];
 }
 
-/**
- * Envia uma mensagem simples
- */
 export async function sendMessage(userId: string, to: string, message: string) {
   const session = sessions[userId];
   if (!session || session.status !== 'CONNECTED') {
@@ -180,55 +212,32 @@ export async function sendMessage(userId: string, to: string, message: string) {
   return await session.client.sendMessage(formattedTo, message);
 }
 
-/**
- * Desconecta e limpa a sessão
- */
-export function stopCampaign(campaignId: string) {
-  // Assuming activeCampaigns and pausedCampaigns are defined elsewhere
-  // For now, this function does nothing without those definitions.
-  // activeCampaigns.delete(campaignId);
-  // pausedCampaigns.delete(campaignId);
-  console.log(`stopCampaign called for campaignId: ${campaignId}. (No-op as activeCampaigns/pausedCampaigns are not defined)`);
-}
-
-/**
- * Sincroniza as últimas conversas e mensagens do WhatsApp para o CRM
- */
 export async function syncRecentHistory(userId: string) {
   const session = sessions[userId];
-  if (!session || session.status !== 'CONNECTED') {
-    throw new Error('WhatsApp não conectado.');
-  }
-
+  if (!session || session.status !== 'CONNECTED') return;
   if (session.syncing) return;
   session.syncing = true;
 
   try {
     const client = session.client;
     const chats = await client.getChats();
-    // Pega os últimos 30 chats para não sobrecarregar
     const recentChats = chats.slice(0, 30);
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      throw new Error(`Usuário ${userId} não encontrado.`);
-    }
+    if (!user) return;
+    
     const organizationId = user.organizationId;
 
     for (const chat of recentChats) {
       if (chat.isGroup) continue;
-
       const phone = chat.id.user;
       const contact = await chat.getContact();
-      const profilePic = await contact.getProfilePicUrl().catch(() => undefined);
       
-      // Busca ou cria o lead
       let lead = await prisma.lead.findFirst({
         where: { phone: { contains: phone.slice(-8) } }
       });
 
       if (!lead) {
-        // Auto-import
         lead = await prisma.lead.create({
           data: {
             name: contact.pushname || contact.name || phone,
@@ -239,10 +248,8 @@ export async function syncRecentHistory(userId: string) {
         });
       }
 
-      // Busca as últimas 15 mensagens
       const messages = await chat.fetchMessages({ limit: 15 });
       for (const msg of messages) {
-        // Evita duplicatas simples contando o tempo e o texto
         const existing = await prisma.message.findFirst({
           where: {
             leadId: lead.id,
@@ -269,7 +276,6 @@ export async function syncRecentHistory(userId: string) {
     }
   } catch (error) {
     console.error('Erro ao sincronizar histórico:', error);
-    throw error;
   } finally {
     session.syncing = false;
   }
@@ -278,7 +284,6 @@ export async function syncRecentHistory(userId: string) {
 export async function getProfilePic(userId: string, phone: string) {
   const session = sessions[userId];
   if (!session || session.status !== 'CONNECTED') return undefined;
-  
   try {
     const contact = await session.client.getContactById(phone + '@c.us');
     return await contact.getProfilePicUrl();
@@ -287,18 +292,13 @@ export async function getProfilePic(userId: string, phone: string) {
   }
 }
 
-/**
- * Desconecta e limpa a sessão
- */
 export async function logoutWhatsApp(userId: string) {
   const session = sessions[userId];
   if (session) {
     try {
       await session.client.logout();
       await session.client.destroy();
-    } catch (err) {
-      console.error(`Erro ao fazer logout do cliente ${userId}:`, err);
-    }
+    } catch {}
     delete sessions[userId];
   }
 }

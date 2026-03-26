@@ -44,23 +44,16 @@ export async function POST(req: Request) {
       }
     });
 
-    // SIMULAÇÃO DE AUTO-REPLY DO LEAD APÓS ENVIAR MENSAGEM (MOCK DO WHATSAPP INBOUND)
-    // Agendando a criação no banco de forma assíncrona para não prender o Request
-    setTimeout(async () => {
-      try {
-        await prisma.message.create({
-          data: {
-            text: "Olá! Obrigado pelo contato. Sim, tenho interesse em saber mais sobre a plataforma.",
-            sender: "lead",
-            leadId,
-            organizationId
-          }
-        });
-        console.log(`[JARVIS] Auto-reply gerado para o lead ${leadId}`);
-      } catch (err) {
-        console.error("Erro ao simular auto-reply:", err);
-      }
-    }, 3000); // 3 Segundos de delay simulando digitação do lead
+    // REAL WHATSAPP SENDING
+    try {
+        const { sendMessage } = require("@/lib/whatsappService");
+        const userId = (session.user as any).id;
+        await sendMessage(userId, phone, message);
+        console.log(`[WA] Mensagem real enviada para ${phone}`);
+    } catch (err: any) {
+        console.error("[WA] Falha ao enviar mensagem real:", err.message);
+        // Opcional: Marcar a mensagem como falha no banco se necessário
+    }
 
     return NextResponse.json({ success: true, message: sentMessage, timestamp: sentMessage.createdAt });
   } catch (error: any) {

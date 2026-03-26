@@ -109,6 +109,25 @@ export async function POST(req: Request) {
   return NextResponse.json(task);
 }
 
+export async function DELETE(req: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+
+  try {
+    const { id } = await req.json();
+    if (!id) return NextResponse.json({ error: "ID não fornecido" }, { status: 400 });
+
+    await prisma.taskCard.delete({
+      where: { id }
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Erro ao deletar tarefa:", error);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+  }
+}
+
 export async function PATCH(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
@@ -123,14 +142,4 @@ export async function PATCH(req: Request) {
     return NextResponse.json(task);
   }
 
-export async function DELETE(req: Request) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
 
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get("id");
-  if (!id) return NextResponse.json({ error: "ID obrigatório" }, { status: 400 });
-
-  await prisma.taskCard.delete({ where: { id } });
-  return NextResponse.json({ success: true });
-}

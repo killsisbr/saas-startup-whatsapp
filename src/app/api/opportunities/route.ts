@@ -44,6 +44,7 @@ export async function POST(req: Request) {
     const lead = await prisma.lead.create({
       data: {
         name: title,
+        phone: '00000000', // Placeholder para criação manual via Kanban
         organizationId: session.user.organizationId,
       },
     });
@@ -60,4 +61,34 @@ export async function POST(req: Request) {
   });
 
   return NextResponse.json(opportunity);
+}
+
+export async function PATCH(req: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+
+  const { id, ...data } = await req.json();
+
+  const opportunity = await prisma.opportunity.update({
+    where: { id },
+    data,
+  });
+
+  return NextResponse.json(opportunity);
+}
+
+export async function DELETE(req: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+
+  try {
+    const { id } = await req.json();
+    if (!id) return NextResponse.json({ error: "ID não fornecido" }, { status: 400 });
+
+    await prisma.opportunity.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Erro ao deletar oportunidade:", error);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+  }
 }

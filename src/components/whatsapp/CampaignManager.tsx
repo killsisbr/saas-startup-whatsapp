@@ -1,439 +1,405 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
-import Card from "@/components/ui/Card";
-import Button from "@/components/ui/Button";
-import { Play, Pause, Square, Plus, Send, AlertCircle, CheckCircle2, Clock, Loader2, Upload, Users, ListFilter, X, FileText } from "lucide-react";
+import React, { useState, useEffect } from 'react';
+import Card from '@/components/ui/Card';
+import Button from '@/components/ui/Button';
+import Badge from '@/components/ui/Badge';
+import { Send, Users, Target, Zap, Clock, AlertCircle, Plus, Upload, Trash2, Search, Filter } from 'lucide-react';
+import { useToast } from "@/context/ToastContext";
+
+interface Campaign {
+  id: string;
+  name: string;
+  status: string;
+  totalContacts: number;
+  processedCount: number;
+  successCount: number;
+}
+
+interface Rule {
+  id: string;
+  trigger: string;
+  response: string;
+  matchType: string;
+  isActive: boolean;
+}
 
 export default function CampaignManager() {
-  const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [newCampaign, setNewCampaign] = useState({ name: '', message: '', targetTags: '' });
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [targetType, setTargetType] = useState<'all' | 'tags'>('all');
-  const [availableTags, setAvailableTags] = useState<string[]>([]);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [showImportModal, setShowImportModal] = useState(false);
+  const toast = useToast();
+  const [activeTab, setActiveTab] = useState<'campaigns' | 'auto-reply'>('campaigns');
+  
+  // Campaigns State
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [name, setName] = useState('');
+  const [message, setMessage] = useState('');
+  const [targetTags, setTargetTags] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const fetchCampaigns = async () => {
+  // Auto-Reply State
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [newRule, setNewRule] = useState({ trigger: '', response: '', matchType: 'KEYWORD' });
+
+  const fetchData = async () => {
     try {
-      const res = await fetch('/api/whatsapp/campaigns');
-      if (res.ok) {
-        const data = await res.json();
-        setCampaigns(data);
-      }
-    } catch (err) {
-      console.error("Erro ao buscar campanhas:", err);
+      const [campRes, ruleRes] = await Promise.all([
+        fetch('/api/whatsapp/campaigns'),
+        fetch('/api/whatsapp/rules')
+      ]);
+      const [campData, ruleData] = await Promise.all([campRes.json(), ruleRes.json()]);
+      setCampaigns(campData || []);
+      setRules(ruleData || []);
+    } catch (e) {
+      console.error('Erro ao buscar dados:', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const handleCreateCampaign = async () => {
+    if (!name || !message) return;
+    setLoading(true);
+    try {
+      await fetch('/api/whatsapp/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, message, targetTags })
+      });
+      setName('');
+      setMessage('');
+      setTargetTags('');
+      toast.success("Campanha criada com sucesso!");
+      fetchData();
+    } catch (e) {
+      console.error('Erro ao criar campanha:', e);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchTags = async () => {
-    try {
-      const res = await fetch('/api/leads/tags');
-      if (res.ok) {
-        const data = await res.json();
-        setAvailableTags(data);
-      }
-    } catch (err) {
-      console.error("Erro ao buscar tags:", err);
-    }
-  };
-
-  useEffect(() => {
-    fetchCampaigns();
-    fetchTags();
-    const interval = setInterval(fetchCampaigns, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleCreateCampaign = async () => {
-    if (!newCampaign.name || !newCampaign.message) return;
-    setSubmitting(true);
-    
-    // Concatena tags se o tipo for 'tags'
-    const campaignData = {
-      ...newCampaign,
-      targetTags: targetType === 'tags' ? selectedTags.join(',') : ''
-    };
-
-    try {
-      const res = await fetch('/api/whatsapp/campaigns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(campaignData),
-      });
-      if (res.ok) {
-        setNewCampaign({ name: '', message: '', targetTags: '' });
-        setSelectedTags([]);
-        setTargetType('all');
-        fetchCampaigns();
-      }
-    } catch (err) {
-      console.error("Erro ao criar campanha:", err);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleAction = async (id: string, action: string) => {
-    try {
-      await fetch('/api/whatsapp/campaigns', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action }),
-      });
-      fetchCampaigns();
-    } catch (err) {
-      console.error("Erro ao realizar ação na campanha:", err);
-    }
-  };
-
-  const toggleTag = (tag: string) => {
-    if (selectedTags.includes(tag)) {
-      setSelectedTags(selectedTags.filter(t => t !== tag));
-    } else {
-      setSelectedTags([...selectedTags, tag]);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-8 p-8 max-w-6xl mx-auto w-full overflow-y-auto custom-scrollbar h-full relative">
-      <div className="flex items-center justify-between">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-2xl font-black text-white tracking-tight uppercase">Gestão de Campanhas</h2>
-          <p className="text-zinc-500 text-xs font-bold tracking-widest uppercase">Crie e monitore seus disparos em massa</p>
-        </div>
-        <Button 
-          variant="outline" 
-          onClick={() => setShowImportModal(true)}
-          className="bg-white/5 border-white/5 hover:bg-white/10 text-xs font-black uppercase tracking-widest gap-2"
-        >
-          <Upload size={14} className="text-primary" />
-          Importar Leads
-        </Button>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Formulário de Criação */}
-        <Card className="lg:col-span-1 flex flex-col gap-6 h-fit sticky top-0">
-          <div className="flex items-center gap-2 text-primary font-bold text-sm uppercase tracking-widest">
-            <Plus size={16} />
-            Nova Campanha
-          </div>
-          
-          <div className="flex flex-col gap-4">
-            {/* Nome */}
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Nome da Campanha</label>
-              <input 
-                type="text" 
-                placeholder="Ex: Promoção de Verão" 
-                className="bg-white/5 border border-white/5 rounded-xl p-3 text-sm text-white outline-none focus:border-primary/50 transition-all"
-                value={newCampaign.name}
-                onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
-              />
-            </div>
-
-            {/* Seleção de Alvos */}
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Público Alvo</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button 
-                  onClick={() => setTargetType('all')}
-                  className={`flex items-center justify-center gap-2 p-2 rounded-xl border text-[10px] font-bold uppercase transition-all ${targetType === 'all' ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/5 text-zinc-500'}`}
-                >
-                  <Users size={12} />
-                  Todos
-                </button>
-                <button 
-                  onClick={() => setTargetType('tags')}
-                  className={`flex items-center justify-center gap-2 p-2 rounded-xl border text-[10px] font-bold uppercase transition-all ${targetType === 'tags' ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/5 text-zinc-500'}`}
-                >
-                  <ListFilter size={12} />
-                  Por Tag
-                </button>
-              </div>
-
-              {targetType === 'tags' && (
-                <div className="flex flex-wrap gap-2 mt-2 p-3 bg-black/20 rounded-xl border border-white/5 min-h-[60px]">
-                  {availableTags.length === 0 ? (
-                    <span className="text-[9px] text-zinc-600 italic">Nenhuma tag disponível</span>
-                  ) : availableTags.map(tag => (
-                    <button 
-                      key={tag}
-                      onClick={() => toggleTag(tag)}
-                      className={`px-2 py-1 rounded-md text-[9px] font-bold border transition-all ${selectedTags.includes(tag) ? 'bg-primary border-primary text-white shadow-neon-sm' : 'bg-white/5 border-white/5 text-zinc-500 hover:text-white'}`}
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            
-            {/* Mensagem */}
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Mensagem</label>
-              <textarea 
-                placeholder="Olá @nome, veja nossa oferta..." 
-                className="bg-white/5 border border-white/5 rounded-xl p-3 text-sm text-white outline-none focus:border-primary/50 transition-all min-h-[120px] resize-none"
-                value={newCampaign.message}
-                onChange={(e) => setNewCampaign({ ...newCampaign, message: e.target.value })}
-              />
-              <p className="text-[9px] text-zinc-600 font-medium">Use <span className="text-primary">@nome</span> para personalizar.</p>
-            </div>
-
-            <Button 
-              onClick={handleCreateCampaign} 
-              disabled={submitting || !newCampaign.name || !newCampaign.message || (targetType === 'tags' && selectedTags.length === 0)}
-              className="w-full shadow-neon"
-            >
-              {submitting ? <Loader2 className="animate-spin" size={18} /> : "Iniciar Disparo"}
-            </Button>
-          </div>
-        </Card>
-
-        {/* Lista de Campanhas */}
-        <div className="lg:col-span-2 flex flex-col gap-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Histórico Recente</span>
-            <span className="text-[10px] font-bold text-primary uppercase tracking-widest">{campaigns.length} Campanhas</span>
-          </div>
-
-          {loading ? (
-            <div className="p-12 text-center text-zinc-600 animate-pulse uppercase font-bold text-xs tracking-widest">Carregando histórico...</div>
-          ) : campaigns.length === 0 ? (
-            <div className="p-12 border-2 border-dashed border-white/5 rounded-3xl text-center text-zinc-600 flex flex-col items-center gap-4">
-              <Send size={32} className="opacity-20" />
-              <p className="text-xs font-bold uppercase tracking-widest">Nenhuma campanha realizada</p>
-            </div>
-          ) : campaigns.map((campaign) => (
-            <Card key={campaign.id} className="relative overflow-hidden group border-white/5 hover:border-primary/20 transition-all">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-white/5">
-                <div 
-                  className={`h-full transition-all duration-500 ${
-                    campaign.status === 'COMPLETED' ? 'bg-emerald-500' : 
-                    campaign.status === 'FAILED' ? 'bg-rose-500' : 
-                    'bg-primary shadow-neon'
-                  }`}
-                  style={{ width: `${campaign.totalContacts > 0 ? (campaign.processedCount / campaign.totalContacts) * 100 : 0}%` }}
-                />
-              </div>
-
-              <div className="flex items-start justify-between gap-4 mt-2">
-                <div className="flex flex-col gap-1 flex-1">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-sm font-bold text-white uppercase tracking-tight">{campaign.name}</h3>
-                    <StatusBadge status={campaign.status} />
-                  </div>
-                  <p className="text-xs text-zinc-500 line-clamp-1">{campaign.message}</p>
-                  {campaign.targetTags && (
-                    <div className="flex gap-1 mt-1">
-                      {campaign.targetTags.split(',').map((t: string) => (
-                        <span key={t} className="text-[8px] bg-white/5 px-1 rounded text-zinc-500 border border-white/5">{t}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {campaign.status === 'PROCESSING' && (
-                    <button onClick={() => handleAction(campaign.id, 'pause')} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-all">
-                      <Pause size={14} />
-                    </button>
-                  )}
-                  {campaign.status === 'PAUSED' && (
-                    <button onClick={() => handleAction(campaign.id, 'resume')} className="p-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary transition-all">
-                      <Play size={14} />
-                    </button>
-                  )}
-                  {(campaign.status === 'PROCESSING' || campaign.status === 'PAUSED') && (
-                    <button onClick={() => handleAction(campaign.id, 'stop')} className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 transition-all">
-                      <Square size={14} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4 mt-6">
-                <div className="flex flex-col gap-1">
-                  <span className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Alvos</span>
-                  <span className="text-sm font-black text-white">{campaign.totalContacts}</span>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[9px] font-bold text-emerald-600/50 uppercase tracking-widest">Sucesso</span>
-                  <span className="text-sm font-black text-emerald-500">{campaign.successCount}</span>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[9px] font-bold text-rose-600/50 uppercase tracking-widest">Falha</span>
-                  <span className="text-sm font-black text-rose-500">{campaign.failedCount}</span>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      </div>
-
-      {showImportModal && (
-        <ImportLeadsModal 
-          onClose={() => setShowImportModal(false)} 
-          onSuccess={() => {
-            setShowImportModal(false);
-            fetchTags();
-          }} 
-        />
-      )}
-    </div>
-  );
-}
-
-function ImportLeadsModal({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [tag, setTag] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [result, setResult] = useState<any>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleUpload = async () => {
-    if (!file) return;
-    setLoading(true);
-    setError('');
-
+  const handleImportLeads = async (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    if (tag) formData.append('tag', tag);
-
     try {
       const res = await fetch('/api/leads/import', {
         method: 'POST',
         body: formData,
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Erro ao importar');
+      if (res.ok) {
+        toast.success('Leads importados com sucesso!');
+        fetchData();
       }
+    } catch (err) {
+      console.error('Erro ao importar:', err);
+    }
+  };
 
-      const data = await res.json();
-      setResult(data);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+  const handleAddRule = async () => {
+    if (!newRule.trigger || !newRule.response) return;
+    try {
+      await fetch('/api/whatsapp/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newRule)
+      });
+      setNewRule({ trigger: '', response: '', matchType: 'KEYWORD' });
+      toast.success("Regra de auto-resposta ativada!");
+      fetchData();
+    } catch (e) {
+      console.error('Erro ao adicionar regra:', e);
+    }
+  };
+
+  const handleDeleteRule = async (id: string) => {
+    try {
+      await fetch('/api/whatsapp/rules', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      toast.info("Regra excluída.");
+      fetchData();
+    } catch (e) {
+      console.error('Erro ao excluir regra:', e);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-3xl p-8 flex flex-col gap-6 relative shadow-2xl">
-        <button onClick={onClose} className="absolute top-6 right-6 p-2 text-zinc-500 hover:text-white transition-all">
-          <X size={20} />
+    <div className="flex flex-col gap-6">
+      {/* TABS ELITE */}
+      <div className="flex items-center gap-4 border-b border-white/5 pb-4">
+        <button 
+          onClick={() => setActiveTab('campaigns')}
+          className={`px-6 py-2 text-sm font-bold rounded-xl transition-all flex items-center gap-2 ${activeTab === 'campaigns' ? "bg-primary text-white shadow-neon" : "text-zinc-500 hover:text-white"}`}
+        >
+          <Zap size={16} />
+          Campanhas em Massa
         </button>
-
-        <div className="flex flex-col gap-2">
-          <h3 className="text-xl font-black text-white uppercase tracking-tight">Importar Lista</h3>
-          <p className="text-zinc-500 text-[10px] font-bold tracking-widest uppercase">Envie sua planilha Excel (.xlsx)</p>
-        </div>
-
-        {!result ? (
-          <div className="flex flex-col gap-5">
-            <div 
-              onClick={() => fileInputRef.current?.click()}
-              className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center gap-3 transition-all cursor-pointer ${file ? 'border-primary bg-primary/5' : 'border-white/5 hover:border-white/10 bg-white/5'}`}
-            >
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                className="hidden" 
-                accept=".xlsx" 
-                onChange={(e) => setFile(e.target.files?.[0] || null)} 
-              />
-              {file ? (
-                <>
-                  <FileText size={32} className="text-primary" />
-                  <span className="text-sm font-bold text-white truncate max-w-full px-4">{file.name}</span>
-                  <span className="text-[10px] text-zinc-500">{(file.size / 1024).toFixed(1)} KB</span>
-                </>
-              ) : (
-                <>
-                  <Upload size={32} className="text-zinc-700" />
-                  <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Clique para selecionar</span>
-                </>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Nome da Etiqueta (Tag)</label>
-              <input 
-                type="text" 
-                placeholder="Ex: Leads-Facebook-Marco" 
-                className="bg-white/5 border border-white/5 rounded-xl p-3 text-sm text-white outline-none focus:border-primary/50 transition-all"
-                value={tag}
-                onChange={(e) => setTag(e.target.value)}
-              />
-            </div>
-
-            {error && (
-              <div className="flex items-center gap-2 p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-500 text-[10px] font-bold uppercase">
-                <AlertCircle size={14} />
-                {error}
-              </div>
-            )}
-
-            <Button 
-              onClick={handleUpload} 
-              disabled={loading || !file}
-              className="w-full shadow-neon"
-            >
-              {loading ? <Loader2 className="animate-spin" size={18} /> : "Iniciar Importação"}
-            </Button>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-6 py-4">
-            <div className="flex items-center justify-center">
-              <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500 border border-emerald-500/20">
-                <CheckCircle2 size={32} />
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-white/5 p-4 rounded-2xl border border-white/5 flex flex-col gap-1 text-center">
-                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Sucesso</span>
-                <span className="text-2xl font-black text-emerald-500">{result.imported}</span>
-              </div>
-              <div className="bg-white/5 p-4 rounded-2xl border border-white/5 flex flex-col gap-1 text-center">
-                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Total</span>
-                <span className="text-2xl font-black text-white">{result.total}</span>
-              </div>
-            </div>
-
-            <Button onClick={onSuccess} className="w-full">Concluir</Button>
-          </div>
-        )}
+        <button 
+          onClick={() => setActiveTab('auto-reply')}
+          className={`px-6 py-2 text-sm font-bold rounded-xl transition-all flex items-center gap-2 ${activeTab === 'auto-reply' ? "bg-primary text-white shadow-neon" : "text-zinc-500 hover:text-white"}`}
+        >
+          <Clock size={16} />
+          Auto-Atendimento
+        </button>
       </div>
+
+      {activeTab === 'campaigns' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
+          <Card className="lg:col-span-2 flex flex-col gap-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white tracking-tight">Broadcast Center</h2>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => (document.getElementById('file-import') as HTMLInputElement).click()}>
+                  <Upload size={14} /> Importar Base (Excel/CSV)
+                </Button>
+                <input id="file-import" type="file" className="hidden" accept=".csv,.xlsx" onChange={(e) => e.target.files?.[0] && handleImportLeads(e.target.files[0])} />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-6 p-6 rounded-2xl bg-white/[0.02] border border-white/5 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Zap size={80} className="text-primary" />
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Identificação do Disparo</label>
+                  <input 
+                    type="text" 
+                    placeholder="Ex: Promoção VIP Páscoa" 
+                    className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white focus:border-primary outline-none transition-all"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Alvos (Tags)</label>
+                  <input 
+                    type="text" 
+                    placeholder="Ex: premium, leads-antigos" 
+                    className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white focus:border-primary outline-none transition-all"
+                    value={targetTags}
+                    onChange={(e) => setTargetTags(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Mensagem do Campanha</label>
+                <textarea 
+                  rows={4} 
+                  placeholder="Olá {nome}! Temos uma oferta exclusiva..." 
+                  className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white focus:border-primary outline-none transition-all resize-none"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                ></textarea>
+                <div className="flex items-center justify-between">
+                   <span className="text-[9px] text-zinc-600 font-medium">Variáveis: {"{nome}"}, {"{email}"}</span>
+                   <span className="text-[9px] text-zinc-600 font-medium">{message.length} caracteres</span>
+                </div>
+              </div>
+
+              <Button variant="neon" className="w-full gap-2 py-4 shadow-neon" onClick={handleCreateCampaign} disabled={loading}>
+                <Send size={18} />
+                {loading ? "Processando Disparo..." : "Iniciar Campanha Agora"}
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <h3 className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest flex items-center gap-2">
+                <Clock size={12} /> Histórico de Execução
+              </h3>
+              <div className="flex flex-col gap-3">
+                {campaigns.map((c) => (
+                  <div key={c.id} className="p-4 rounded-2xl bg-white/[0.01] border border-white/5 flex items-center justify-between hover:bg-white/[0.03] transition-colors">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-sm font-bold text-white">{c.name}</span>
+                      <div className="flex items-center gap-3">
+                        <Badge variant={c.status === 'COMPLETED' ? 'purple' : 'warning'} className="text-[9px] py-0">{c.status}</Badge>
+                        <span className="text-[10px] text-zinc-600 font-bold">{c.processedCount}/{c.totalContacts} envios</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="flex flex-col text-right">
+                        <span className="text-xs font-bold text-emerald-500">{c.successCount} OK</span>
+                        <div className="w-24 h-1 bg-white/5 rounded-full mt-1 overflow-hidden">
+                          <div className="h-full bg-emerald-500 shadow-neon" style={{ width: `${(c.successCount / (c.totalContacts || 1)) * 100}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {campaigns.length === 0 && <p className="text-zinc-600 italic text-center py-8 border border-dashed border-white/5 rounded-2xl">Nenhuma campanha registrada.</p>}
+              </div>
+            </div>
+          </Card>
+
+          <Card className="flex flex-col gap-8 bg-surface-muted/30 border-white/5">
+             <div className="flex flex-col gap-2">
+                <h2 className="text-xl font-bold text-white tracking-tight">Atividade em Tempo Real</h2>
+                <p className="text-xs text-zinc-500">Métricas de entrega do servidor JARVIS.</p>
+             </div>
+             
+             <div className="flex flex-col gap-6">
+                <div className="p-5 rounded-2xl bg-primary/10 border border-primary/20 flex flex-col gap-2 relative overflow-hidden">
+                   <div className="absolute top-2 right-2 flex gap-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                   </div>
+                   <span className="text-[10px] font-bold text-primary uppercase tracking-widest">Sucesso Médio</span>
+                   <span className="text-4xl font-black text-white">98.4%</span>
+                   <p className="text-[9px] text-zinc-500">Otimizado para evitar bloqueios.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                   <div className="p-4 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-1">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase">Abertura</span>
+                      <span className="text-xl font-bold text-white">1.2k</span>
+                   </div>
+                   <div className="p-4 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-1">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase">Respostas</span>
+                      <span className="text-xl font-bold text-white">452</span>
+                   </div>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                   <h4 className="text-[10px] font-bold text-white uppercase tracking-widest">Configurações de Anti-Spam</h4>
+                   <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+                         <span className="text-xs text-zinc-400">Delay Randômico</span>
+                         <Badge variant="purple" className="text-[9px]">Ativo</Badge>
+                      </div>
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+                         <span className="text-xs text-zinc-400">Rotação de IP</span>
+                         <Badge variant="purple" className="text-[9px]">Proxy</Badge>
+                      </div>
+                   </div>
+                </div>
+             </div>
+          </Card>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
+          <Card className="lg:col-span-2 flex flex-col gap-6">
+            <div className="flex flex-col gap-2">
+              <h2 className="text-2xl font-black text-white tracking-tight">Auto-Atendimento Inteligente</h2>
+              <p className="text-sm text-zinc-500">Defina regras de resposta instantânea para gatilhos comuns.</p>
+            </div>
+
+            <div className="flex flex-col gap-6 p-6 rounded-2xl bg-white/[0.02] border border-primary/20 shadow-neon-soft relative overflow-hidden">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Palavra-Chave ou Gatilho</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={14} />
+                    <input 
+                      type="text" 
+                      placeholder="Ex: preço, como funciona, oi" 
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 pl-10 text-sm text-white focus:border-primary outline-none transition-all"
+                      value={newRule.trigger}
+                      onChange={(e) => setNewRule({...newRule, trigger: e.target.value})}
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Tipo de Comparação</label>
+                  <div className="relative">
+                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={14} />
+                    <select 
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 pl-10 text-sm text-white focus:border-primary outline-none transition-all appearance-none"
+                      value={newRule.matchType}
+                      onChange={(e) => setNewRule({...newRule, matchType: e.target.value})}
+                    >
+                      <option value="KEYWORD">Palavra Exata</option>
+                      <option value="CONTAINS">Contém o texto</option>
+                      <option value="REGEX">Expressão Regular (REGEX)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Resposta Automática do Robô</label>
+                <textarea 
+                  rows={3} 
+                  placeholder="Olá! Nossos planos começam em R$ 99 mensais. Deseja saber mais?" 
+                  className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white focus:border-primary outline-none transition-all resize-none"
+                  value={newRule.response}
+                  onChange={(e) => setNewRule({...newRule, response: e.target.value})}
+                ></textarea>
+              </div>
+
+              <Button variant="neon" className="gap-2 py-4" onClick={handleAddRule}>
+                <Plus size={18} /> Ativar Novo Robô de Resposta
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-4">
+               <h3 className="text-[10px] font-bold text-white uppercase tracking-widest">Regras de Resposta Ativas</h3>
+               <div className="flex flex-col gap-3">
+                  {rules.map((rule) => (
+                    <div key={rule.id} className="p-5 rounded-2xl bg-white/[0.01] border border-white/5 flex items-center justify-between group hover:bg-white/[0.03] transition-all">
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-3">
+                          <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase bg-white/10 text-primary border border-primary/20">{rule.matchType}</span>
+                          <span className="text-sm font-bold text-white tracking-tight">"{rule.trigger}"</span>
+                        </div>
+                        <p className="text-xs text-zinc-500 max-w-lg line-clamp-1 italic">"{rule.response}"</p>
+                      </div>
+                      <button 
+                        onClick={() => handleDeleteRule(rule.id)}
+                        className="p-3 rounded-xl bg-rose-500/5 text-rose-500/50 hover:text-rose-500 hover:bg-rose-500/10 transition-all opacity-0 group-hover:opacity-100"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  {rules.length === 0 && <p className="text-zinc-600 italic text-center py-12 border border-dashed border-white/10 rounded-2xl">Nenhum robô configurado ainda.</p>}
+               </div>
+            </div>
+          </Card>
+
+          <Card className="flex flex-col gap-8">
+             <div className="flex flex-col gap-2">
+                <h2 className="text-xl font-bold text-white">Escalabilidade</h2>
+                <Badge variant="purple" className="w-fit">Automação Ativa</Badge>
+             </div>
+
+             <div className="flex flex-col gap-6">
+                <div className="flex items-center gap-4 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/10">
+                   <Zap size={20} className="text-emerald-500" />
+                   <div className="flex flex-col">
+                      <span className="text-xs font-bold text-white">Funil Autônomo</span>
+                      <span className="text-[10px] text-zinc-500">Leads movem para "Contato" em tempo real.</span>
+                   </div>
+                </div>
+
+                <div className="flex flex-col gap-4">
+                   <h4 className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Como funciona?</h4>
+                   <div className="space-y-4">
+                      <Step title="1. Gatilho detectado" desc="O JARVIS intercepta a mensagem recebida." />
+                      <Step title="2. Match inteligente" desc="As regras são processadas em milissegundos." />
+                      <Step title="3. Resposta enviada" desc="O cliente recebe o texto via WhatsApp." />
+                      <Step title="4. CRM Atualizado" desc="O lead é movido no Kanban automaticamente." />
+                   </div>
+                </div>
+             </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const configs: any = {
-    'PENDING': { icon: Clock, color: 'text-zinc-500 bg-white/5', label: 'Pendente' },
-    'PROCESSING': { icon: Loader2, color: 'text-primary bg-primary/10 animate-pulse-slow', label: 'Enviando' },
-    'PAUSED': { icon: Pause, color: 'text-amber-500 bg-amber-500/10', label: 'Pausada' },
-    'COMPLETED': { icon: CheckCircle2, color: 'text-emerald-500 bg-emerald-500/10', label: 'Finalizada' },
-    'FAILED': { icon: AlertCircle, color: 'text-rose-500 bg-rose-500/10', label: 'Erro' },
-  };
-
-  const config = configs[status] || configs['PENDING'];
-  const Icon = config.icon;
-
+function Step({ title, desc }: { title: string; desc: string }) {
   return (
-    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tighter ${config.color}`}>
-      <Icon size={10} className={status === 'PROCESSING' ? 'animate-spin' : ''} />
-      {config.label}
+    <div className="flex gap-3">
+       <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shadow-neon" />
+       <div className="flex flex-col">
+          <span className="text-xs font-bold text-white">{title}</span>
+          <span className="text-[10px] text-zinc-500">{desc}</span>
+       </div>
     </div>
   );
 }

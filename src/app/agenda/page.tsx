@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
-import { Plus, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, MapPin, AlertCircle, CheckCircle2, BarChart } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, MapPin, AlertCircle, CheckCircle2, BarChart, Bell } from "lucide-react";
 
 import NewEventModal from "@/components/modals/NewEventModal";
 import DayDetailModal from "@/components/modals/DayDetailModal";
@@ -17,7 +17,7 @@ export default function AgendaPage() {
   const [isDayDetailOpen, setIsDayDetailOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [filter, setFilter] = useState("Mês");
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 2, 25)); // Março 2026
+  const [currentDate, setCurrentDate] = useState(new Date());
 
   const fetchData = async () => {
     try {
@@ -36,11 +36,32 @@ export default function AgendaPage() {
 
   useEffect(() => {
     fetchData();
+
+    // Polling: verificar lembretes de confirmação a cada 5 minutos
+    const reminderInterval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/events/check-reminders');
+        const data = await res.json();
+        if (data.sent > 0) {
+          console.log(`[Auto-Confirm] ${data.sent} lembrete(s) enviado(s).`);
+          fetchData(); // Recarregar eventos para atualizar badges
+        }
+      } catch (err) {
+        console.warn('[Auto-Confirm] Falha no polling:', err);
+      }
+    }, 5 * 60 * 1000); // 5 minutos
+
+    // Verificar imediatamente ao carregar
+    fetch('/api/events/check-reminders').then(r => r.json()).then(d => {
+      if (d.sent > 0) fetchData();
+    }).catch(() => {});
+
+    return () => clearInterval(reminderInterval);
   }, []);
 
   const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
   const prevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
-  const goToToday = () => setCurrentDate(new Date(2026, 2, 25));
+  const goToToday = () => setCurrentDate(new Date());
 
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
   const getFirstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
@@ -198,7 +219,7 @@ export default function AgendaPage() {
                         <div key={i} className="border-r border-b border-white/5 p-4 min-h-[400px] flex flex-col gap-4 hover:bg-white/[0.01]">
                            <div className="flex flex-col items-center">
                               <span className="text-[10px] font-bold text-zinc-500">{days[date.getDay()]}</span>
-                              <span className={`text-xl font-bold ${date.toDateString() === new Date(2026, 2, 25).toDateString() ? "text-primary shadow-neon-text" : "text-white"}`}>{date.getDate()}</span>
+                              <span className={`text-xl font-bold ${date.toDateString() === new Date().toDateString() ? "text-primary shadow-neon-text" : "text-white"}`}>{date.getDate()}</span>
                            </div>
                            <div className="flex flex-col gap-2">
                               {dailyEvents.map((event, idx) => (
@@ -238,7 +259,8 @@ export default function AgendaPage() {
                         </span>
                         <div className="flex flex-col gap-1 max-h-[80px] overflow-hidden">
                           {dailyEvents.slice(0, 3).map((event, idx) => (
-                            <div key={idx} className={`px-2 py-1 rounded-md bg-white/5 border-l-2 ${event.color || 'border-primary'} text-[9px] font-bold text-zinc-300 truncate`}>
+                            <div key={idx} className={`px-2 py-1 rounded-md bg-white/5 border-l-2 ${event.color || 'border-primary'} text-[9px] font-bold text-zinc-300 truncate flex items-center gap-1`}>
+                              {event.reminderSent && <Bell size={8} className="text-emerald-400 shrink-0" />}
                               {event.title}
                             </div>
                           ))}

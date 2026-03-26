@@ -20,16 +20,23 @@ Este projeto é um SaaS robusto que integra gestão de clientes (CRM), funil de 
 - Sincronização de histórico de mensagens (Últimas 50 conversas).
 - Enriquecimento de perfil automático.
 
-### 📊 Gestão de Leads & Kanban
-- Registro automático de novos contatos vindos do WhatsApp.
-- Pipeline de vendas (Kanban) para controle de oportunidades.
-- Tagging automático para segmentação de listas.
+### 🤖 AI Scheduling & CRM Manager
+- **Automação de Agendamento**: IA autônoma que qualifica leads e agenda visitas diretamente no calendário via chat.
+- **Persona Engine**: Configuração dinâmica de comportamento (Local LLM ou Gemini).
+- **Extração de Dados**: Captura automática de Nome, CPF e outras informações críticas durante a conversa.
+
+### ⏰ Automação de Lembretes & Cron
+- **Endpoint de Confirmação**: `/api/events/check-reminders` (Pronto para Vercel Cron ou GitHub Actions).
+- **Lembrete 1h Antes**: Disparo automático de mensagem de confirmação para o lead 1 hora antes do agendamento.
+- **Auto-Update**: Marcação automática de lembretes enviados para evitar duplicidade.
+
+### 📊 Gestão de Leads & Kanban (Avançado)
+- **CRUD Completo**: Criação e edição de tarefas, oportunidades e colunas diretamente na interface.
+- **Pipeline Inteligente**: Movimentação automática de leads qualificados pela IA.
 
 ### 🚀 Campanhas e Disparos em Massa
-- **Importação via Excel**: Módulo de upload `.xlsx` para até milhares de leads.
-- **Segmentação por Tag**: Dispare mensagens apenas para grupos específicos (ex: "Lista-Pascoa").
-- **Variáveis de Mensagem**: Use `@nome` para personalizar cada envio.
-- **Controle de Fluxo**: Pause, retome ou pare disparos em tempo real.
+- **Bulk Import**: Importação via Excel com processamento em segundo plano.
+- **Logs em Tempo Real**: Monitoramento detalhado de cada envio na interface de campanha.
 
 ## ⚙️ Instalação e Configuração
 
@@ -48,6 +55,12 @@ npm install
 DATABASE_URL="file:./prisma/dev.db"
 NEXTAUTH_SECRET="seu-segredo"
 NEXTAUTH_URL="http://localhost:3000"
+
+# IA Config (DNA JARVIS)
+AI_PROVIDER="local" # ou "gemini"
+GEMINI_API_KEY="sua-chave-aqui"
+LOCAL_LLM_URL="http://127.0.0.1:11434"
+LOCAL_LLM_MODEL="llama3.1:latest"
 ```
 
 4. Prepare o Banco de Dados
@@ -62,8 +75,8 @@ npm run dev
 ```
 
 ## 🔒 Segurança & Privacidade (DNA JARVIS)
-- **Offline-first**: Sessões do WhatsApp são armazenadas localmente em `./sessions`.
-- **Relational Context**: Estrutura preparada para integração com Knowledge Graphs.
+- **Offline-first**: Sessões do WhatsApp e Banco de Dados (SQLite) armazenados localmente.
+- **Relational Memory**: Estrutura preparada para integração com Knowledge Graphs via `src/lib/ai/aiProvider.ts`.
 
 ## 👨‍💻 Créditos
 Desenvolvido por **KILLSIS** via JARVIS Swarm Engine.

@@ -1,151 +1,263 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import NewTaskModal from "@/components/modals/NewTaskModal";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import { Plus, MoreHorizontal, Calendar, DollarSign, User, ArrowRight } from "lucide-react";
+import Badge from "@/components/ui/Badge";
+import { Plus, MoreHorizontal, Calendar } from "lucide-react";
+import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
+import NewTaskModal from "@/components/modals/NewTaskModal";
+import NewColumnModal from "@/components/modals/NewColumnModal";
 
-const STAGES = [
-  { id: "CONTATO", title: "Contato Inicial", color: "bg-blue-500" },
-  { id: "QUALIFICACAO", title: "Qualificação", color: "bg-purple-500" },
-  { id: "PROPOSTA", title: "Proposta", color: "bg-orange-500" },
-  { id: "NEGOCIACAO", title: "Negociação", color: "bg-primary" },
-  { id: "FECHAMENTO", title: "Fechamento", color: "bg-emerald-500" },
-];
-
-export default function KanbanPage() {
-  const [isModalOpen, setIsModalOpen] = useState(false);
+export default function KanbanProjetosPage() {
+  const [columns, setColumns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [opportunities, setOpportunities] = useState<any[]>([]);
+  const [filter, setFilter] = useState("Meus Projetos");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<any>(null);
+  const [projectId, setProjectId] = useState("");
 
-  const fetchData = async () => {
+  const fetchProjects = async () => {
     try {
-      const res = await fetch("/api/opportunities");
+      const res = await fetch("/api/projects");
       const data = await res.json();
-      setOpportunities(data || []);
+      if (data && data.length > 0) {
+        setColumns(data[0].columns || []);
+        setProjectId(data[0].id);
+      }
     } catch (error) {
-      console.error("Erro ao buscar oportunidades:", error);
+      console.error("Erro ao buscar projetos:", error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
+    fetchProjects();
   }, []);
 
-  const updateStage = async (id: string, newStage: string) => {
-    try {
-      await fetch(`/api/opportunities/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stage: newStage }),
-      });
-      fetchData();
-    } catch (error) {
-      console.error("Erro ao mover oportunidade:", error);
+  const onDragEnd = async (result: DropResult) => {
+    const { source, destination, draggableId } = result;
+
+    if (!destination) return;
+    if (source.droppableId === destination.droppableId && source.index === destination.index) return;
+
+    // Local optimistic update
+    const sourceColIndex = columns.findIndex(c => c.id === source.droppableId);
+    const destColIndex = columns.findIndex(c => c.id === destination.droppableId);
+    
+    if (sourceColIndex === -1 || destColIndex === -1) return;
+
+    const sourceCol = columns[sourceColIndex];
+    const destCol = columns[destColIndex];
+    
+    const sourceCards = [...sourceCol.cards];
+    const destCards = source.droppableId === destination.droppableId ? sourceCards : [...destCol.cards];
+
+    const [draggedCard] = sourceCards.splice(source.index, 1);
+    
+    // Update local columnId optimistic
+    draggedCard.columnId = destination.droppableId;
+    destCards.splice(destination.index, 0, draggedCard);
+
+    const newColumns = [...columns];
+    newColumns[sourceColIndex] = { ...sourceCol, cards: sourceCards };
+    newColumns[destColIndex] = { ...destCol, cards: destCards };
+
+    setColumns(newColumns);
+
+    // API Call
+    if (source.droppableId !== destination.droppableId) {
+      try {
+        await fetch("/api/tasks", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: draggableId, columnId: destination.droppableId }),
+        });
+      } catch (error) {
+        console.error("Erro ao mover card:", error);
+        fetchProjects(); // Revert on failure
+      }
     }
   };
 
-  if (loading) return <div className="text-white p-8">Carregando Funil de Vendas...</div>;
+  if (loading) return <div className="text-white p-8">Carregando Projetos...</div>;
+
+  const stageStyles: Record<string, { color: string, dot: string }> = {
+    "A Fazer": { color: "bg-blue-500", dot: "bg-blue-500" },
+    "Em Andamento": { color: "bg-purple-500", dot: "bg-purple-500" },
+    "Em Revisão": { color: "bg-orange-500", dot: "bg-orange-500" },
+    "Concluído": { color: "bg-emerald-500", dot: "bg-emerald-500" },
+  };
 
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex items-center justify-between">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-3xl font-bold text-white tracking-tight">Pipeline de Vendas</h1>
-          <p className="text-sm text-zinc-500 font-medium">Gestão de leads e oportunidades em tempo real.</p>
+    <div className="flex flex-col gap-8 h-full">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col gap-4">
+          <h1 className="text-4xl font-bold text-white tracking-tight">
+            Kanban <span className="text-zinc-500">/ Projetos</span>
+          </h1>
+          
+          <div className="flex gap-2">
+            {["Meus Projetos", "Urgente", "Todos"].map(f => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                  filter === f 
+                  ? 'bg-white/10 text-white border border-white/20' 
+                  : 'text-zinc-500 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
         </div>
-        <Button variant="neon" size="lg" className="gap-2" onClick={() => setIsModalOpen(true)}>
-           <Plus size={18} />
-           Nova Oportunidade
+
+        <Button 
+           variant="neon" 
+           size="lg" 
+           className="gap-2 shrink-0 bg-primary/20 text-primary hover:bg-primary/30 border-primary/50 shadow-none"
+           onClick={() => setIsColumnModalOpen(true)}
+        >
+          <Plus size={18} />
+          Nova Coluna
         </Button>
       </div>
 
-      <div className="flex gap-6 overflow-x-auto pb-4 custom-scrollbar min-h-[70vh]">
-        {STAGES.map((stage) => {
-          const stageOpportunities = opportunities.filter((op) => op.stage === stage.id);
-          const totalValue = stageOpportunities.reduce((acc, curr) => acc + (curr.value || 0), 0);
+      <div className="flex gap-6 overflow-x-auto pb-4 custom-scrollbar flex-1 min-h-[70vh]">
+        <DragDropContext onDragEnd={onDragEnd}>
+          {columns.map((column) => {
+            const style = stageStyles[column.title] || { color: "bg-zinc-500", dot: "bg-zinc-500" };
 
-          return (
-            <div key={stage.id} className="min-w-[320px] flex-1 flex flex-col gap-6">
-              <div className="flex items-center justify-between px-2">
-                 <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${stage.color} shadow-neon`} />
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">{stage.title}</h3>
-                    <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center text-[10px] font-bold text-zinc-500">
-                      {stageOpportunities.length}
-                    </span>
-                 </div>
-                 <div className="text-[10px] font-bold text-zinc-600">
-                    {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                 </div>
+            return (
+              <div key={column.id} className="min-w-[320px] w-[320px] flex flex-col gap-4">
+                <div className="flex items-center justify-between px-1">
+                   <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${style.dot} shadow-neon`} />
+                      <h3 className="text-sm font-bold text-white uppercase tracking-wider">{column.title}</h3>
+                      <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center text-[10px] font-bold text-zinc-500">
+                        {column.cards?.length || 0}
+                      </span>
+                   </div>
+                   <button className="text-zinc-500 hover:text-white transition-colors">
+                     <MoreHorizontal size={16} />
+                   </button>
+                </div>
+
+                <Droppable droppableId={column.id}>
+                  {(provided, snapshot) => (
+                    <div 
+                      {...provided.droppableProps} 
+                      ref={provided.innerRef}
+                      className={`flex flex-col gap-4 flex-1 p-1 rounded-xl transition-colors ${snapshot.isDraggingOver ? 'bg-white/5' : ''}`}
+                    >
+                      {column.cards?.map((task: any, index: number) => (
+                        <Draggable key={task.id} draggableId={task.id} index={index}>
+                          {(provided, snapshot) => (
+                            <div
+                              ref={provided.innerRef}
+                              {...provided.draggableProps}
+                              {...provided.dragHandleProps}
+                              style={{ 
+                                ...provided.draggableProps.style,
+                                opacity: snapshot.isDragging ? 0.9 : 1
+                              }}
+                            >
+                              <Card 
+                                 className={`flex flex-col gap-4 group transition-all p-5 cursor-pointer ${snapshot.isDragging ? 'border-primary shadow-xl shadow-primary/10' : 'hover:border-white/20'}`}
+                                 onClick={() => {
+                                   setEditingTask(task);
+                                   setIsModalOpen(true);
+                                 }}
+                              >
+                                 <div className="flex items-center gap-2 flex-wrap">
+                                    <Badge variant="info" className="uppercase tracking-wider text-[9px]">
+                                      {task.priority || "NORMAL"}
+                                    </Badge>
+                                 </div>
+                                 
+                                 <div className="flex flex-col gap-1.5">
+                                    <h4 className="text-base font-bold text-white tracking-tight group-hover:text-primary transition-colors">
+                                      {task.title}
+                                    </h4>
+                                    {task.description && (
+                                      <p className="text-xs text-zinc-400 font-medium leading-relaxed mt-1">
+                                        {task.description}
+                                      </p>
+                                    )}
+                                 </div>
+                                 
+                                 <div className="flex flex-col gap-2 mt-2">
+                                    <div className="flex items-center justify-between text-[10px] font-bold">
+                                       <span className="text-zinc-500">Progresso</span>
+                                       <span className="text-white">{task.progress || 0}%</span>
+                                    </div>
+                                    <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                       <div 
+                                         className={`h-full rounded-full ${style.color}`} 
+                                         style={{ width: `${task.progress || 0}%` }} 
+                                       />
+                                    </div>
+                                 </div>
+
+                                 <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5">
+                                    <div className="flex items-center -space-x-2">
+                                      <div
+                                        className="w-7 h-7 rounded-full border-2 border-[#09090b] flex items-center justify-center text-[10px] font-bold text-white"
+                                        style={{ backgroundColor: `hsl(${(task.title || '').charCodeAt(0) * 37 % 360}, 60%, 45%)` }}
+                                      >
+                                        {(task.title || 'T')[0].toUpperCase()}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-zinc-500 text-[10px] font-bold uppercase tracking-wider">
+                                       <Calendar size={12} />
+                                       {task.date || new Date(task.createdAt).toLocaleDateString()}
+                                    </div>
+                                 </div>
+                              </Card>
+                            </div>
+                          )}
+                        </Draggable>
+                      ))}
+                      {provided.placeholder}
+                      
+                      <button 
+                         className="flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-white/5 text-zinc-600 hover:border-white/20 hover:text-white transition-all text-sm font-medium mt-2"
+                         onClick={() => {
+                            setEditingTask(null);
+                            setIsModalOpen(true);
+                         }}
+                      >
+                         <Plus size={16} />
+                         Novo Card
+                      </button>
+                    </div>
+                  )}
+                </Droppable>
               </div>
-
-              <div className="flex flex-col gap-4">
-                {stageOpportunities.map((op: any) => (
-                  <Card key={op.id} className="flex flex-col gap-4 group hover:border-primary/40 transition-all">
-                     <div className="flex flex-col gap-1">
-                        <h4 className="text-sm font-bold text-white tracking-tight group-hover:text-primary transition-colors">
-                          {op.title}
-                        </h4>
-                        <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-bold uppercase">
-                           <User size={10} />
-                           {op.lead?.name || "Lead Desconhecido"}
-                        </div>
-                     </div>
-                     
-                     <div className="flex items-center justify-between py-2 border-y border-white/5">
-                        <div className="flex items-center gap-1 text-emerald-500 font-bold text-xs">
-                           <DollarSign size={12} />
-                           {(op.value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </div>
-                        <div className="flex items-center gap-1 text-zinc-600 text-[10px] font-bold">
-                           <Calendar size={10} />
-                           {new Date(op.createdAt).toLocaleDateString()}
-                        </div>
-                     </div>
-
-                     <div className="flex items-center justify-between gap-2 mt-2">
-                        <select 
-                          className="bg-white/5 border border-white/5 rounded-lg py-1 px-2 text-[10px] text-zinc-400 outline-none focus:border-primary/30"
-                          value={op.stage}
-                          onChange={(e) => updateStage(op.id, e.target.value)}
-                        >
-                          {STAGES.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
-                        </select>
-                        <button className="p-1 px-2 bg-white/5 rounded-lg border border-white/5 text-zinc-500 hover:text-white transition-colors">
-                           <MoreHorizontal size={14} />
-                        </button>
-                     </div>
-                  </Card>
-                ))}
-                
-                <button 
-                  onClick={() => setIsModalOpen(true)}
-                  className="flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-white/10 text-zinc-600 hover:border-primary/20 hover:text-primary transition-all text-xs font-bold group"
-                >
-                   <Plus size={14} className="group-hover:scale-110 transition-transform" />
-                   Adicionar Lead
-                </button>
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </DragDropContext>
       </div>
-
-      <button 
-        onClick={() => setIsModalOpen(true)}
-        className="fixed bottom-8 right-8 w-14 h-14 rounded-full bg-gradient-neon shadow-neon flex items-center justify-center text-white active:scale-95 transition-all lg:hidden"
-      >
-         <Plus size={28} />
-      </button>
 
       <NewTaskModal 
         isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        onSuccess={fetchData} 
+        onClose={() => {
+           setIsModalOpen(false);
+           setTimeout(() => setEditingTask(null), 300);
+        }} 
+        onSuccess={fetchProjects} 
+        initialData={editingTask}
+      />
+      
+      <NewColumnModal 
+        isOpen={isColumnModalOpen}
+        onClose={() => setIsColumnModalOpen(false)}
+        onSuccess={fetchProjects}
+        projectId={projectId}
       />
     </div>
   );

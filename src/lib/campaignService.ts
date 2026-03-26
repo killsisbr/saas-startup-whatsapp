@@ -34,7 +34,7 @@ export async function processCampaign(campaignId: string, userId: string) {
       leads = await prisma.lead.findMany({
         where: {
           organizationId: campaign.organizationId,
-          phone: { not: null },
+          phone: { not: '' },
           OR: targetTags.map(tag => ({
             tags: { contains: tag }
           }))
@@ -44,7 +44,7 @@ export async function processCampaign(campaignId: string, userId: string) {
       leads = await prisma.lead.findMany({
         where: {
           organizationId: campaign.organizationId,
-          phone: { not: null }
+          phone: { not: '' }
         }
       });
     }

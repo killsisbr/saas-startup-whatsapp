@@ -7,6 +7,8 @@ import Badge from "@/components/ui/Badge";
 import { Users2, Plus, MoreVertical, Mail, Shield, Clock, LayoutGrid, Filter, Search } from "lucide-react";
 
 import InviteMemberModal from "@/components/modals/InviteMemberModal";
+import AiAgentManager from "@/components/team/AiAgentManager";
+import FloatingTestBot from "@/components/team/FloatingTestBot";
 
 export default function EquipePage() {
   const [loading, setLoading] = useState(true);
@@ -53,6 +55,8 @@ export default function EquipePage() {
            Convidar Membro
         </Button>
       </div>
+
+      <AiAgentManager />
 
       <div className="flex items-center gap-6">
         <Card className="flex items-center gap-6 py-4 px-8 min-w-[240px]">
@@ -127,6 +131,7 @@ export default function EquipePage() {
           </tbody>
         </table>
       </div>
+      <FloatingTestBot />
     </div>
   );
 }

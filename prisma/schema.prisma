@@ -8,19 +8,23 @@ datasource db {
 }
 
 model Organization {
-  id           String        @id @default(cuid())
-  name         String
-  slug         String        @unique
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  customers    Customer[]
-  events       Event[]
-  leads        Lead[]
-  projects     Project[]
-  transactions Transaction[]
-  messages     Message[]     @relation("OrganizationMessages")
-  campaigns    Campaign[]    @relation("OrganizationCampaigns")
-  users        User[]        @relation("OrganizationUsers")
+  id            String             @id @default(cuid())
+  name          String
+  slug          String             @unique
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  customers     Customer[]
+  events        Event[]            @relation("OrganizationEvents")
+  leads         Lead[]
+  projects      Project[]
+  transactions  Transaction[]      @relation("OrganizationTransactions")
+  messages      Message[]          @relation("OrganizationMessages")
+  campaigns     Campaign[]         @relation("OrganizationCampaigns")
+  users         User[]             @relation("OrganizationUsers")
+  autoReplies   AutoReplyRule[]
+  scheduled     ScheduledMessage[]
+  conversations SalesConversation[]
+  aiConfig      AiAgentConfig?     @relation("OrganizationAiConfig")
 }
 
 model User {
@@ -39,21 +43,75 @@ model User {
 }
 
 model Lead {
-  id             String        @id @default(cuid())
+  id             String      @id @default(cuid())
   name           String
+  phone          String      @unique
   email          String?
-  phone          String?
-  status         String        @default("NOVO")
-  score          Int           @default(0)
-  tags           String?       // Tags separadas por vírgula (ex: "import-pascoa,vip")
-  organizationId String
-  consentGiven   Boolean       @default(false)
+  status         String      @default("NOVO")
+  score          Int         @default(0)
+  tags           String?     // Tags separadas por vírgula
+  consentGiven   Boolean     @default(false)
   consentDate    DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  organization   Organization  @relation(fields: [organizationId], references: [id])
-  opportunities  Opportunity[]
+  lastInteraction DateTime   @default(now())
+  
+  aiEnabled      Boolean     @default(true)
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
   messages       Message[]     @relation("LeadMessages")
+  opportunities  Opportunity[]
+  scheduled      ScheduledMessage[]
+  conversations  SalesConversation[]
+  
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model SalesConversation {
+  id             String      @id @default(cuid())
+  etapa          String      @default("inicio") // inicio, qualificacao, proposta, negociacao, captura_lead, fechamento
+  dados          String      @default("{}")     // Histórico e metadados em JSON
+  lastOutcome    String      @default("pending") // pending, success, failure
+  
+  leadId         String
+  lead           Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model AutoReplyRule {
+  id             String      @id @default(cuid())
+  trigger        String      // Keyword ou Regex
+  response       String      @map("response") // Texto da resposta
+  matchType      String      @default("KEYWORD") // KEYWORD, REGEX, CONTAINS
+  isActive       Boolean     @default(true)
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model ScheduledMessage {
+  id             String      @id @default(cuid())
+  content        String
+  sendAt         DateTime
+  status         String      @default("PENDING") // PENDING, SENT, FAILED, CANCELLED
+  
+  leadId         String
+  lead           Lead        @relation(fields: [leadId], references: [id])
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 }
 
 model Message {
@@ -69,15 +127,17 @@ model Message {
 }
 
 model Opportunity {
-  id        String     @id @default(cuid())
-  title     String
-  value     Float      @default(0)
-  stage     String     @default("CONTATO")
-  leadId    String
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  lead      Lead       @relation(fields: [leadId], references: [id])
-  tasks     TaskCard[]
+  id          String     @id @default(cuid())
+  title       String
+  value       Float      @default(0)
+  stage       String     @default("CONTATO INICIAL")
+  priority    String     @default("ENTRADA")
+  statusBadge String?
+  leadId      String
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  lead        Lead       @relation(fields: [leadId], references: [id])
+  tasks       TaskCard[]
 }
 
 model Project {
@@ -127,7 +187,7 @@ model Customer {
   organizationId String
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
-  organization   Organization   @relation(fields: [organizationId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id])
   subscriptions  Subscription[]
 }
 
@@ -151,10 +211,11 @@ model Event {
   color          String?      @default("bg-primary")
   priority       String?      @default("NORMAL")
   location       String?
+  reminderSent   Boolean      @default(false)
   organizationId String
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization   Organization @relation("OrganizationEvents", fields: [organizationId], references: [id])
 }
 
 model Transaction {
@@ -167,7 +228,7 @@ model Transaction {
   organizationId String
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization   Organization @relation("OrganizationTransactions", fields: [organizationId], references: [id])
 }
 
 model Campaign {
@@ -195,4 +256,19 @@ model CampaignLog {
   error      String?
   createdAt  DateTime @default(now())
   campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
+
+model AiAgentConfig {
+  id             String       @id @default(cuid())
+  name           String       @default("JARVIS")
+  temperament    String       @default("Profissional, direto e solícito.")
+  bio            String?      @default("Especialista em vendas e suporte da empresa.")
+  products       String?      @default("Consultar catálogo principal.")
+  active         Boolean      @default(true)
+  
+  organizationId String       @unique
+  organization   Organization @relation("OrganizationAiConfig", fields: [organizationId], references: [id])
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 }

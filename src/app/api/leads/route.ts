@@ -19,7 +19,7 @@ export async function GET() {
   const leads = await prisma.lead.findMany({
     where: { organizationId },
     include: { opportunities: true },
-    orderBy: { createdAt: "desc" },
+    orderBy: { updatedAt: "desc" },
   });
 
   return NextResponse.json(leads);

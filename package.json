@@ -6,9 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "jarvis:restart": "powershell -ExecutionPolicy Bypass -File scripts/restart-jarvis.ps1"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@hello-pangea/dnd": "^18.0.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
     "bcryptjs": "^3.0.3",

@@ -3,16 +3,20 @@
 import React, { useState, useEffect, useMemo } from "react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import { Search, Plus, Phone, Video, MoreVertical, Paperclip, Smile, Mic, Send, FileText, Download, CheckCheck, Star, Clock, MessageSquare, Users, QrCode, LogOut, Loader2, Play, RefreshCw, BarChart3, TrendingUp, CheckCircle2 } from "lucide-react";
+import Badge from "@/components/ui/Badge";
+import { Search, Plus, Phone, Video, MoreVertical, Paperclip, Smile, Mic, Send, FileText, Download, CheckCheck, Star, Clock, MessageSquare, Users, QrCode, LogOut, Loader2, Play, RefreshCw, BarChart3, TrendingUp, CheckCircle2, Calendar } from "lucide-react";
 import CampaignManager from "@/components/whatsapp/CampaignManager";
+import { useToast } from "@/context/ToastContext";
 
 export default function WhatsAppPage() {
+  const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [leads, setLeads] = useState<any[]>([]);
   const [activeLead, setActiveLead] = useState<any>(null);
   const [messageText, setMessageText] = useState("");
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
   
   // Estado de busca
   const [searchQuery, setSearchQuery] = useState("");
@@ -22,6 +26,13 @@ export default function WhatsAppPage() {
   const [waStatus, setWaStatus] = useState<string>('DISCONNECTED');
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('WHATSAPP');
+
+  // AGENDAMENTO PREMIUM
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleTime, setScheduleTime] = useState("");
+  const [scheduleBody, setScheduleBody] = useState("");
+  const [createAgendaEvent, setCreateAgendaEvent] = useState(true);
 
   const fetchStatus = async () => {
     try {
@@ -65,7 +76,7 @@ export default function WhatsAppPage() {
       const res = await fetch("/api/leads");
       const data = await res.json();
       setLeads(data || []);
-      if (data && data.length > 0 && !activeLead) setActiveLead(data[0]);
+      if (data && data.length > 0 && !activeLead && !leads.length) setActiveLead(data[0]);
     } catch (error) {
       console.error("Erro ao buscar leads para whatsapp:", error);
     } finally {
@@ -79,9 +90,10 @@ export default function WhatsAppPage() {
       const res = await fetch("/api/whatsapp/sync/full", { method: "POST" });
       if (res.ok) {
         await fetchLeads();
+        toast.success("Sincronização concluída!");
       } else {
         const data = await res.json();
-        alert("Erro na sincronização: " + data.error);
+        toast.error("Erro na sincronização: " + data.error);
       }
     } catch (err) {
       console.error("Erro ao sincronizar:", err);
@@ -106,8 +118,20 @@ export default function WhatsAppPage() {
     fetchLeads();
     fetchStatus();
     const statusInterval = setInterval(fetchStatus, 5000);
-    return () => clearInterval(statusInterval);
+    const leadsInterval = setInterval(fetchLeads, 10000); // Pesquisar novos leads a cada 10s
+    return () => {
+      clearInterval(statusInterval);
+      clearInterval(leadsInterval);
+    };
   }, []);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   useEffect(() => {
     if (!activeLead) return;
@@ -120,7 +144,6 @@ export default function WhatsAppPage() {
     return () => clearInterval(interval);
   }, [activeLead]);
 
-  // Filtro de leads em tempo real
   const filteredLeads = useMemo(() => {
     if (!searchQuery) return leads;
     return leads.filter(l => 
@@ -159,7 +182,7 @@ export default function WhatsAppPage() {
         fetchMessages(activeLead.id);
       } else {
         const data = await res.json();
-        alert(data.error || "Erro ao enviar mensagem");
+        toast.error(data.error || "Erro ao enviar mensagem");
         setMessages(prev => prev.filter(m => m.id !== optimisticMsg.id));
       }
     } catch (error) {
@@ -170,9 +193,48 @@ export default function WhatsAppPage() {
     }
   };
 
-  if (loading) return <div className="text-white p-8 animate-pulse text-xs font-bold uppercase tracking-widest">Carregando CRM Messenger...</div>;
+  const handleScheduleMessage = async () => {
+    if (!activeLead || !scheduleDate || !scheduleTime || !scheduleBody.trim()) {
+      toast.error("Preencha todos os campos e a mensagem do agendamento.");
+      return;
+    }
 
-  // Tela de Desconectado / QR Code
+    const sendAt = new Date(`${scheduleDate}T${scheduleTime}`);
+    if (sendAt <= new Date()) {
+      toast.error("A data deve ser no futuro.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch("/api/whatsapp/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: scheduleBody,
+          sendAt,
+          leadId: activeLead.id,
+          createEvent: createAgendaEvent
+        })
+      });
+
+      if (res.ok) {
+        toast.success("Mensagem agendada com sucesso!");
+        setShowScheduleModal(false);
+        setScheduleBody("");
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Erro ao agendar.");
+      }
+    } catch (err) {
+      console.error("Erro ao agendar:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading && !leads.length) return <div className="text-white p-8 animate-pulse text-xs font-bold uppercase tracking-widest">Carregando CRM Messenger...</div>;
+
   if (waStatus === 'DISCONNECTED' || waStatus === 'QR_CODE' || waStatus === 'INITIALIZING') {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-120px)] -m-8 bg-background">
@@ -277,19 +339,16 @@ export default function WhatsAppPage() {
                 />
               )
             })}
-            {filteredLeads.length === 0 && (
-              <div className="p-8 text-center text-zinc-600 text-[10px] font-bold uppercase tracking-widest">
-                {searchQuery ? "Nenhum resultado para a busca" : "Nenhum lead encontrado"}
-              </div>
-            )}
           </div>
         )}
       </div>
 
-      {/* Janela Principal (Chat ou Campanhas ou Dashboard) */}
+      {/* Janela Principal */}
       <div className="flex-1 flex flex-col bg-background relative overflow-hidden">
         {activeTab === 'CAMPANHAS' ? (
-          <CampaignManager />
+          <div className="p-8 overflow-y-auto custom-scrollbar h-full">
+            <CampaignManager />
+          </div>
         ) : activeTab === 'DASHBOARD' ? (
           <DashboardView />
         ) : activeLead ? (
@@ -332,17 +391,15 @@ export default function WhatsAppPage() {
                    </div>
                  );
                })}
-
-               {messages.length === 0 && (
-                 <div className="text-center p-10 font-bold italic text-zinc-600/50 uppercase text-[10px] tracking-widest">
-                    Inicie uma conversa com {activeLead.name}.
-                 </div>
-               )}
+               <div ref={messagesEndRef} />
             </div>
 
             <div className="p-8 bg-surface/10 border-t border-white/5 shrink-0 backdrop-blur-lg">
                <div className="flex items-center gap-4">
-                  <button className="text-zinc-500 hover:text-white transition-colors"><Plus size={20} /></button>
+                  <button onClick={() => setShowScheduleModal(true)} className="text-zinc-500 hover:text-primary transition-colors flex flex-col items-center">
+                    <Clock size={20} />
+                    <span className="text-[8px] font-black uppercase mt-1">Agendar</span>
+                  </button>
                   <button className="text-zinc-500 hover:text-white transition-colors"><Smile size={20} /></button>
                   <div className="flex-1 bg-white/5 rounded-2xl border border-white/5 px-6 py-3 flex items-center gap-4 focus-within:border-primary/30 transition-all">
                      <input 
@@ -353,7 +410,6 @@ export default function WhatsAppPage() {
                         onChange={(e) => setMessageText(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
                      />
-                     <Mic size={18} className="text-zinc-600 hover:text-primary cursor-pointer transition-colors" />
                   </div>
                   <button 
                     onClick={handleSendMessage}
@@ -371,55 +427,86 @@ export default function WhatsAppPage() {
              <p className="text-sm font-bold uppercase tracking-widest">Selecione uma conversa</p>
           </div>
         )}
+
+        {/* Modal de Agendamento Premium */}
+        {showScheduleModal && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in">
+             <Card className="w-full max-w-sm flex flex-col gap-6 shadow-neon border-primary/20 p-8">
+                <div className="flex items-center justify-between">
+                   <h3 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                     <Calendar size={18} className="text-primary" />
+                     Agendar Mensagem
+                   </h3>
+                   <button onClick={() => setShowScheduleModal(false)} className="text-zinc-500 hover:text-white">✕</button>
+                </div>
+                
+                <div className="flex flex-col gap-4">
+                   <div className="flex flex-col gap-2">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Data do Envio</label>
+                      <input 
+                        type="date" 
+                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white focus:border-primary outline-none"
+                        value={scheduleDate}
+                        onChange={(e) => setScheduleDate(e.target.value)}
+                      />
+                   </div>
+                   <div className="flex flex-col gap-2">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Horário</label>
+                      <input 
+                        type="time" 
+                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white focus:border-primary outline-none"
+                        value={scheduleTime}
+                        onChange={(e) => setScheduleTime(e.target.value)}
+                      />
+                   </div>
+                   <div className="flex flex-col gap-2">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Corpo da Mensagem</label>
+                      <textarea 
+                        rows={3}
+                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white focus:border-primary outline-none resize-none"
+                        placeholder="Digite o conteúdo aqui..."
+                        value={scheduleBody}
+                        onChange={(e) => setScheduleBody(e.target.value)}
+                      />
+                   </div>
+                   <div className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        id="agenda-event"
+                        checked={createAgendaEvent}
+                        onChange={(e) => setCreateAgendaEvent(e.target.checked)}
+                        className="accent-primary"
+                      />
+                      <label htmlFor="agenda-event" className="text-[10px] font-bold text-zinc-400 uppercase">Criar Evento na Agenda</label>
+                   </div>
+                </div>
+
+                <Button variant="neon" className="w-full gap-2" onClick={handleScheduleMessage}>
+                   <Clock size={16} /> Confirmar Agendamento
+                </Button>
+             </Card>
+          </div>
+        )}
       </div>
 
-      {/* Informações do Lead (Lado Direito) */}
+      {/* Info Panel Right */}
       {activeLead && activeTab === 'WHATSAPP' && (
-        <div className="w-80 border-l border-white/5 flex flex-col p-8 bg-surface/30 gap-8">
+        <div className="w-80 border-l border-white/5 flex flex-col p-8 bg-surface/30 gap-8 overflow-y-auto">
+           {/* ... (Lead Info) */}
            <div className="flex flex-col items-center text-center gap-4">
-              <div className="relative">
-                 <div className="w-24 h-24 rounded-3xl bg-surface-muted border border-white/10 flex items-center justify-center text-2xl font-black text-primary overflow-hidden">
-                    {activeLead.name.substring(0, 1)}
-                 </div>
-                 <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-primary flex items-center justify-center border-4 border-background text-white shadow-neon cursor-pointer active:scale-90 transition-all">
-                    <Star size={14} />
-                 </div>
+              <div className="w-24 h-24 rounded-3xl bg-zinc-800 border border-white/10 flex items-center justify-center text-2xl font-black text-primary overflow-hidden">
+                 {activeLead.name.substring(0, 1)}
               </div>
               <div className="flex flex-col gap-1">
                  <h2 className="text-lg font-bold text-white tracking-tight">{activeLead.name}</h2>
-                 <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest leading-tight">{activeLead.email || 'Email não cadastrado'}</span>
                  <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">{activeLead.phone}</span>
               </div>
            </div>
 
            <div className="flex flex-col gap-6">
-              <div className="flex flex-col gap-2">
-                 <div className="flex items-center justify-between">
-                    <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Lead Score</span>
-                    <span className="text-[9px] font-bold text-primary">{activeLead.score}%</span>
-                 </div>
-                 <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-neon shadow-neon" style={{ width: `${activeLead.score}%` }} />
-                 </div>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                 <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Estágio Atual</span>
-                 <div className="p-3 bg-primary/10 border border-primary/20 rounded-xl flex items-center gap-3">
-                    <MessageSquare size={16} className="text-primary" />
-                    <span className="text-xs font-bold text-primary uppercase text-[10px] tracking-tighter">{activeLead.status}</span>
-                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                 <button className="p-4 rounded-2xl bg-white/5 border border-white/5 hover:border-primary/20 transition-all flex flex-col items-center gap-2 group">
-                    <Clock size={18} className="text-zinc-500 group-hover:text-primary transition-colors" />
-                    <span className="text-[10px] font-bold text-zinc-500 group-hover:text-white transition-colors uppercase">Tarefa</span>
-                 </button>
-                 <button className="p-4 rounded-2xl bg-white/5 border border-white/5 hover:border-primary/20 transition-all flex flex-col items-center gap-2 group">
-                    <FileText size={18} className="text-zinc-500 group-hover:text-primary transition-colors" />
-                    <span className="text-[10px] font-bold text-zinc-500 group-hover:text-white transition-colors uppercase">Nota</span>
-                 </button>
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/5 flex flex-col gap-2">
+                 <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status do Funil</span>
+                 <Badge variant="purple" className="w-fit">{activeLead.status}</Badge>
               </div>
            </div>
         </div>
@@ -428,14 +515,14 @@ export default function WhatsAppPage() {
   );
 }
 
-function ChatItem({ name, message, time, unread, active, onClick, badge }: any) {
+function ChatItem({ name, message, time, active, onClick, badge }: any) {
   return (
     <div 
       onClick={onClick}
       className={`p-6 border-b border-white/5 cursor-pointer transition-all flex items-center gap-4 relative overflow-hidden ${active ? 'bg-primary/10' : 'hover:bg-white/[0.02]'}`}
     >
       {active && <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary shadow-neon" />}
-      <div className="w-12 h-12 rounded-full bg-zinc-800 border border-white/10 shrink-0 flex items-center justify-center text-xs font-bold text-zinc-500 uppercase overflow-hidden">
+      <div className="w-12 h-12 rounded-full bg-zinc-800 border border-white/10 shrink-0 flex items-center justify-center text-xs font-bold text-zinc-500 uppercase">
          {name.substring(0, 1)}
       </div>
       <div className="flex-1 min-w-0 flex flex-col gap-1">
@@ -446,7 +533,7 @@ function ChatItem({ name, message, time, unread, active, onClick, badge }: any) 
          <p className="text-[11px] text-zinc-500 truncate leading-relaxed">{message}</p>
          {badge && (
            <div className="flex mt-1">
-             <span className="bg-primary/10 text-primary border border-primary/20 text-[8px] font-bold px-2 py-0.5 rounded uppercase tracking-tighter">{badge}</span>
+             <span className="bg-primary/10 text-primary border border-primary/20 text-[8px] font-bold px-2 py-0.5 rounded uppercase">{badge}</span>
            </div>
          )}
       </div>
@@ -504,15 +591,6 @@ function DashboardView() {
                     <div className="h-full bg-primary shadow-neon" style={{ width: `${stats?.totalMessages > 0 ? (stats.sentMessages / stats.totalMessages) * 100 : 0}%` }} />
                  </div>
               </div>
-              <div className="flex flex-col gap-2">
-                 <div className="flex justify-between text-[10px] font-bold uppercase">
-                    <span className="text-emerald-500">Recebidas</span>
-                    <span className="text-white">{stats?.receivedMessages || 0}</span>
-                 </div>
-                 <div className="h-1.5 w-full bg-emerald-500/5 rounded-full overflow-hidden">
-                    <div className="h-full bg-emerald-500 shadow-[0_0_15px_#10B981]" style={{ width: `${stats?.totalMessages > 0 ? (stats.receivedMessages / stats.totalMessages) * 100 : 0}%` }} />
-                 </div>
-              </div>
            </div>
         </Card>
 
@@ -525,7 +603,6 @@ function DashboardView() {
               </div>
            </div>
            <p className="text-xs text-zinc-500 leading-relaxed italic">"O sistema está monitorando mensagens e campanhas em tempo real. A sincronização de histórico está disponível na barra lateral para novos contatos."</p>
-           <Button variant="outline" size="sm" className="w-fit text-[10px]">Ver Logs do Sistema</Button>
         </Card>
       </div>
     </div>

@@ -38,7 +38,7 @@ export async function importLeadsFromBuffer(
     const workbook = new ExcelJS.Workbook();
     // Tenta carregar como XLSX primeiro, se falhar tenta CSV
     try {
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as any);
     } catch (e) {
       // Para CSV, precisamos converter o buffer para stream ou usar a lib de forma diferente
       // mas o exceljs.csv.read costuma funcionar com streams. 
